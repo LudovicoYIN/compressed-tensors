@@ -84,8 +84,6 @@ def calculate_qparams(
     bit_min, bit_max = calculate_range(quantization_args, device)
     bit_range = bit_max - bit_min
 
-    zp_dtype = quantization_args.zp_dtype
-
     if quantization_args.symmetric:
         max_val_pos = torch.max(torch.abs(min_vals), torch.abs(max_vals))
         scales = max_val_pos / (float(bit_range) / 2)
@@ -116,6 +114,13 @@ def calculate_qparams(
 
         zero_points = torch.zeros(scales.shape, device=device, dtype=min_vals.dtype)
     else:
+        if (
+            quantization_args.num_bits == 4
+            and quantization_args.type == QuantizationType.FLOAT
+        ):
+            raise NotImplementedError(
+                "Asymmetric Quantization is not supported for FP4"
+            )
         scales = (max_vals - min_vals) / float(bit_range)
         scales = torch.clamp(scales, min=torch.finfo(torch.float32).eps)
         zero_points = bit_min - (min_vals / scales)
@@ -125,7 +130,7 @@ def calculate_qparams(
     # if casting to int, use round instead of truncate
     if quantization_args.type == QuantizationType.INT:
         zero_points = torch.round(zero_points)
-    zero_points = zero_points.to(zp_dtype)
+    zero_points = zero_points.to(quantization_args.zp_dtype)
 
     if scales.ndim == 0:
         scales = scales.reshape(1)

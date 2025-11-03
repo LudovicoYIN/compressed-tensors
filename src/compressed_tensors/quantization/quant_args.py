@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 from compressed_tensors.utils import Aliasable
 from compressed_tensors.utils.helpers import deprecated
+from compressed_tensors.utils.type import TorchDtype
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -174,8 +175,8 @@ class QuantizationArgs(BaseModel, use_enum_values=True):
     block_structure: Optional[List[int]] = None
     dynamic: Union[DynamicType, bool] = False
     actorder: Union[ActivationOrdering, bool, None] = None
-    scale_dtype: Optional[torch.dtype] = None
-    zp_dtype: Optional[torch.dtype] = None
+    scale_dtype: Optional[TorchDtype] = None
+    zp_dtype: Optional[TorchDtype] = None
     observer: Optional[str] = Field(
         default=None,
         description=(
@@ -380,7 +381,7 @@ class QuantizationArgs(BaseModel, use_enum_values=True):
     def get_observer(self) -> str:
         return self.observer
 
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid")
 
 
 def round_to_quantized_type(
