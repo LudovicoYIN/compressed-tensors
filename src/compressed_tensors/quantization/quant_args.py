@@ -361,7 +361,6 @@ class QuantizationArgs(BaseModel, use_enum_values=True):
         if zp_dtype is None:
             zp_dtype = model.pytorch_dtype()
 
-        # 2. Identify quantization scale and zp dtype
         if scale_dtype is None:
             scale_dtype = torch.bfloat16
 

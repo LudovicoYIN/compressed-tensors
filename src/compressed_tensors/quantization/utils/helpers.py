@@ -93,10 +93,17 @@ def calculate_qparams(
             scales = global_scale * scales
 
         if quantization_args.scale_dtype is not None:
+            if torch.is_floating_point(
+                torch.empty((), dtype=quantization_args.scale_dtype)
+            ):
+                info = torch.finfo(quantization_args.scale_dtype)
+            else:
+                info = torch.iinfo(quantization_args.scale_dtype)
+
             scales = torch.clamp(
                 scales,
-                max=torch.finfo(quantization_args.scale_dtype).max,
-                min=torch.finfo(quantization_args.scale_dtype).min,
+                min=info.min,
+                max=info.max,
             )
             scales = scales.to(quantization_args.scale_dtype)
 
