@@ -107,7 +107,7 @@ def calculate_qparams(
             )
             scales = scales.to(quantization_args.scale_dtype)
 
-        # TODO: in the case of MoEs, the global_scale may also be 0/need to be clamped
+        # Clamp any potential 0s
         if scales.dtype == FP8_E4M3_DATA.dtype:
             # torch.clamp not supported for FP8
             # use the next largest fp8 value from 0
