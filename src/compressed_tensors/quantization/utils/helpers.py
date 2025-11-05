@@ -24,6 +24,7 @@ from compressed_tensors.quantization.quant_args import (
     QuantizationArgs,
     QuantizationStrategy,
     QuantizationType,
+    round_to_quantized_type,
 )
 from compressed_tensors.quantization.quant_scheme import QuantizationScheme
 from compressed_tensors.utils import deprecated
@@ -93,32 +94,16 @@ def calculate_qparams(
             scales = global_scale * scales
 
         if quantization_args.scale_dtype is not None:
-            if torch.is_floating_point(
-                torch.empty((), dtype=quantization_args.scale_dtype)
-            ):
-                info = torch.finfo(quantization_args.scale_dtype)
-            else:
-                info = torch.iinfo(quantization_args.scale_dtype)
-
-            scales = torch.clamp(
-                scales,
-                min=info.min,
-                max=info.max,
+            scales = round_to_quantized_type(
+                scales, dtype=quantization_args.scale_dtype
             )
-            scales = scales.to(quantization_args.scale_dtype)
 
-        # Clamp any potential 0s
-        if scales.dtype == FP8_E4M3_DATA.dtype:
-            # torch.clamp not supported for FP8
-            # use the next largest fp8 value from 0
-            scales = torch.where(
-                scales == 0,
-                torch.tensor(0.125, dtype=FP8_E4M3_DATA.dtype, device=device),
-                scales,
-            )
-        else:
-            scales = torch.clamp(scales, min=torch.finfo(torch.float32).eps)
-
+        eps = _get_dtype_eps(dtype=quantization_args.scale_dtype)
+        scales = torch.where(
+            scales == 0,
+            torch.tensor(eps, dtype=scales.dtype, device=device),
+            scales,
+        )
         zero_points = torch.zeros(scales.shape, device=device, dtype=min_vals.dtype)
     else:
         if (
@@ -455,3 +440,14 @@ def strategy_cdiv(
             logger.bind(log_once=True).warning(message)
 
     return dividend
+
+
+def _get_dtype_eps(dtype: torch.dtype) -> float:
+    if dtype == FP8_E4M3_DATA.dtype:
+        return 0.125
+    elif dtype == FP4_E2M1_DATA.dtype:
+        return 0.25
+    elif torch.is_floating_point(dtype):
+        return torch.finfo(dtype).eps
+    else:
+        return 1.0
