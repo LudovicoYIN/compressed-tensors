@@ -447,7 +447,5 @@ def _get_dtype_eps(dtype: torch.dtype) -> float:
         return 0.125
     elif dtype == FP4_E2M1_DATA.dtype:
         return 0.25
-    elif torch.is_floating_point(dtype):
-        return torch.finfo(dtype).eps
     else:
-        return 1.0
+        return torch.finfo(dtype).eps
