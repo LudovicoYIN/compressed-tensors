@@ -42,7 +42,8 @@ class INT4_DATA(torch.iinfo if TYPE_CHECKING else object):
     max = 7
     dtype = "int4"
 
-    def round(self, x: torch.Tensor) -> torch.Tensor:
+    @torch.compile
+    def round_and_clamp(self, x: torch.Tensor) -> torch.Tensor:
         sign = torch.sign(x)
         x[(x <= -7.5)] = -8
         x[(-7.5 < x) & (x <= -6.5)] = -7
@@ -77,12 +78,8 @@ class FP4_E2M1_DATA(torch.finfo if TYPE_CHECKING else object):
     exponent = 2
     mantissa = 1
 
-    def round(self, x: torch.Tensor) -> torch.Tensor:
-        return self.cast_to_fp4(x)
-
-    @staticmethod
     @torch.compile
-    def cast_to_fp4(x):
+    def round_and_clamp(self, x: torch.Tensor) -> torch.Tensor:
         sign = torch.sign(x)
         x = torch.abs(x)
         x[(x >= 0.0) & (x <= 0.25)] = 0.0
@@ -460,7 +457,7 @@ def round_to_quantized_type(
 
     if isinstance(info, (INT4_DATA, FP4_E2M1_DATA)):
         # (round and clamp): int4 and fp4 are missing pytorch dtypes
-        tensor = info.round(tensor)
+        tensor = info.round_and_clamp(tensor)
 
     elif isinstance(info, torch.finfo):
         # (clamp): float dtypes can return nan/inf if values are out of bounds
