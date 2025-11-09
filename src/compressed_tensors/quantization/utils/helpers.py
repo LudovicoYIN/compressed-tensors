@@ -79,7 +79,7 @@ def calculate_qparams(
     max_vals = torch.max(max_vals, torch.zeros_like(max_vals))
     device = min_vals.device
 
-    quant_info = _get_dtype_info(quantization_args.quantized_info())
+    quant_info = quantization_args.quantized_info()
     bit_min, bit_max = quant_info.min, quant_info.max
     bit_range = bit_max - bit_min
 
@@ -404,15 +404,5 @@ def strategy_cdiv(
     return dividend
 
 
-def _get_dtype_info(dtype: torch.dtype | str) -> torch.finfo | torch.iinfo:
-    if isinstance(dtype, str):
-        if dtype == FP4_E2M1_DATA.dtype:
-            return FP4_E2M1_DATA
-
-        raise ValueError(f"Could not get dtype info of string {dtype}")
-
-    elif dtype.is_floating_point:
-        return torch.finfo(dtype)
-
-    else:
-        return torch.iinfo(dtype)
+def _get_dtype_info(dtype: torch.dtype) -> torch.finfo | torch.iinfo:
+    return torch.finfo(dtype) if dtype.is_floating_point else torch.iinfo(dtype)

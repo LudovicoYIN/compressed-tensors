@@ -409,13 +409,13 @@ class QuantizationArgs(BaseModel, use_enum_values=True):
         # strings to represent int4/fp4 dtypes
         if self.type == QuantizationType.FLOAT:
             if self.num_bits == 4:
-                return FP4_E2M1_DATA
+                return FP4_E2M1_DATA()
             elif self.num_bits == 8:
                 return torch.finfo(torch.float8_e4m3fn)
 
         elif self.type == QuantizationType.INT:
             if self.num_bits == 4:
-                return INT4_DATA
+                return INT4_DATA()
             elif self.num_bits == 8:
                 return torch.iinfo(torch.int8)
             elif self.num_bits == 16:
