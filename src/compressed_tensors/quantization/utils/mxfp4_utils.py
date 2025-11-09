@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import torch
-from compressed_tensors.quantization.quant_args import BFLOAT16_DATA, FP4_E2M1_DATA
+from compressed_tensors.quantization.quant_args import FP4_E2M1_DATA
 
 
 __all__ = ["convert_mxfp4_exp_scale", "generate_mxfp4_scales", "round_to_power_2"]
@@ -58,12 +58,13 @@ def round_to_power_2(x: torch.Tensor) -> torch.Tensor:
     assert x.dtype == torch.bfloat16
     x = x.view(torch.uint16).to(torch.int32)
 
+    bfloat_exponent = 8
+    bfloat_mantissa = 7
+
     # Find closest power of 2
-    BFLOAT16_VAL_TO_ADD = 1 << (BFLOAT16_DATA.mantissa - FP4_E2M1_DATA.mantissa - 1)
+    BFLOAT16_VAL_TO_ADD = 1 << (bfloat_mantissa - FP4_E2M1_DATA.mantissa - 1)
     # Add value to push the value to the next exponent
-    BFLOAT16_SIGN_EXPONENT_MASK = (
-        (1 << (BFLOAT16_DATA.exponent + 1)) - 1
-    ) << BFLOAT16_DATA.mantissa
+    BFLOAT16_SIGN_EXPONENT_MASK = ((1 << (bfloat_exponent + 1)) - 1) << bfloat_mantissa
     # mask to only keep exponent - we conservatively round down
     # to better represent smaller numbers / prevent overflow
     block_max_uint = torch.bitwise_and(

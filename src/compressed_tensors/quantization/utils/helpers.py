@@ -16,6 +16,8 @@ import logging
 import math
 from typing import Generator, Optional, Tuple
 
+from functools import cache
+
 import torch
 from compressed_tensors.quantization.quant_args import (
     FP4_E2M1_DATA,
@@ -82,7 +84,7 @@ def calculate_qparams(
 
     device = min_vals.device
 
-    bit_min, bit_max = calculate_range(quantization_args, device)
+    bit_min, bit_max = calculate_range(args.num_bits, args.type, device)
     bit_range = bit_max - bit_min
 
     # 1. Generate scale and zero-point
@@ -108,7 +110,7 @@ def calculate_qparams(
 
     # 3. Conditionally round the scale to the quantized dtype, if scale_dtype is set
     if quantization_args.scale_dtype is not None:
-        scales = round_to_quantized_type(scales, dtype=quantization_args.scale_dtype)
+        scales = round_to_quantized_type(scales, quantization_args.scale_dtype)
 
     # 4. Update any 0s with small values to
     # prevent div by 0
@@ -124,7 +126,7 @@ def calculate_qparams(
     )
 
     # 5. Round the zp to zp_dtype
-    zero_points = round_to_quantized_type(zero_points, dtype=quantization_args.zp_dtype)
+    zero_points = round_to_quantized_type(zero_points, quantization_args.zp_dtype)
 
     if scales.ndim == 0:
         scales = scales.reshape(1)
@@ -192,7 +194,8 @@ def compute_dynamic_scales_and_zp(
     return calculate_qparams(min_val, max_val, args, global_scale=global_scale)
 
 
-def calculate_range(quantization_args: QuantizationArgs, device: str) -> Tuple:
+@cache
+def calculate_range(qdtype: torch.dtype | FloatArgs) -> tuple[float, float]:
     """
     Calculated the effective quantization range for the given Quantization Args
 
@@ -200,25 +203,16 @@ def calculate_range(quantization_args: QuantizationArgs, device: str) -> Tuple:
     :param device: device to store the range to
     :return: tuple endpoints for the given quantization range
     """
-    if quantization_args.type == QuantizationType.INT:
-        bit_range = 2**quantization_args.num_bits
-        q_max = torch.tensor(bit_range / 2 - 1, device=device)
-        q_min = torch.tensor(-bit_range / 2, device=device)
-    elif quantization_args.type == QuantizationType.FLOAT:
-        if quantization_args.num_bits == 8:
-            q_max = torch.tensor(FP8_E4M3_DATA.max, device=device)
-            q_min = torch.tensor(FP8_E4M3_DATA.min, device=device)
-        elif quantization_args.num_bits == 4:
-            q_max = torch.tensor(FP4_E2M1_DATA.max, device=device)
-            q_min = torch.tensor(FP4_E2M1_DATA.min, device=device)
-        else:
-            raise NotImplementedError(
-                "Range calculation only supported for 4 and 8 bits"
-            )
-    else:
-        raise ValueError(f"Invalid quantization type {quantization_args.type}")
+    if isinstance(qdtype, FloatArgs):
+        return (qdtype.min, qdtype.max)
+    
+    elif torch.is_floating_point(torch.tensor([], dtype=qdtype)):
+        finfo = torch.finfo(qdtype)
+        return (finfo.min, finfo.max)
 
-    return q_min, q_max
+    else:
+        iinfo = torch.iinfo(qdtype)
+        return (iinfo.min, iinfo.max)
 
 
 def is_module_quantized(module: Module) -> bool:

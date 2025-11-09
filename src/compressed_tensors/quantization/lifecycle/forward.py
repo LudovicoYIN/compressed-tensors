@@ -25,10 +25,7 @@ from compressed_tensors.quantization.quant_args import (
 )
 from compressed_tensors.quantization.quant_config import QuantizationStatus
 from compressed_tensors.quantization.quant_scheme import QuantizationScheme
-from compressed_tensors.quantization.utils import (
-    calculate_range,
-    compute_dynamic_scales_and_zp,
-)
+from compressed_tensors.quantization.utils import compute_dynamic_scales_and_zp
 from torch.nn import Module
 
 
@@ -201,7 +198,6 @@ def _process_quantization(
     do_dequantize: bool = True,
     global_scale: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    q_min, q_max = calculate_range(args, x.device)
     group_size = args.group_size
 
     # blockwise FP8: quantize per 2D block, supports block_structure for static block
@@ -242,8 +238,6 @@ def _process_quantization(
                 x=x_blocks,
                 scale=sb,
                 zero_point=zb,
-                q_min=q_min,
-                q_max=q_max,
                 args=args,
                 dtype=dtype,
                 global_scale=global_scale,
@@ -309,8 +303,6 @@ def _process_quantization(
                 zero_point=zero_point.unsqueeze(-1) if zero_point is not None else None,
                 dtype=dtype,
                 global_scale=global_scale,
-                q_min=q_min,
-                q_max=q_max,
                 args=args,
             )
 
@@ -336,8 +328,6 @@ def _process_quantization(
                 x=x,
                 scale=scale,
                 zero_point=zero_point,
-                q_min=q_min,
-                q_max=q_max,
                 args=args,
                 dtype=dtype,
                 global_scale=global_scale,
@@ -456,8 +446,6 @@ def _quantize(
     x: torch.Tensor,
     scale: torch.Tensor,
     zero_point: torch.Tensor,
-    q_min: torch.Tensor,
-    q_max: torch.Tensor,
     args: QuantizationArgs,
     dtype: Optional[torch.dtype] = None,
     global_scale: Optional[torch.Tensor] = None,
@@ -473,18 +461,12 @@ def _quantize(
     if zero_point is not None:
         scaled += zero_point.to(x.dtype)
 
-    # clamp first because cast isn't guaranteed to be saturated (ie for fp8)
-    clamped_value = torch.clamp(
-        scaled,
-        q_min,
-        q_max,
-    )
-    quantized_value = round_to_quantized_type(clamped_value, args)
+    x = round_to_quantized_type(x, args.pytorch_dtype())
 
     if dtype is not None:
-        quantized_value = quantized_value.to(dtype)
+        x = x.to(dtype)
 
-    return quantized_value
+    return x
 
 
 @torch.no_grad()

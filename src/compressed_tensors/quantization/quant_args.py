@@ -16,6 +16,7 @@ import warnings
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
+from compressed_tensors.quantization.utils.helpers import calculate_range
 import torch
 from compressed_tensors.utils import Aliasable
 from compressed_tensors.utils.helpers import deprecated
@@ -26,7 +27,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 __all__ = [
     "FP8_E4M3_DATA",
     "FP4_E2M1_DATA",
-    "BFLOAT16_DATA",
     "FloatArgs",
     "QuantizationType",
     "QuantizationStrategy",
@@ -36,22 +36,22 @@ __all__ = [
     "DynamicType",
 ]
 
+class FP4_E2M1_DATA(torch.finfo):
+    bits = 4
+    min = -6.0
+    max = 6.0
+    eps = 0.25
+    tiny = 0.25
+    smallest_normal = 1.0
+    resolution = 0.5  # 2 ** (-mantissa)
+    dtype = "FP4_E2M1"
 
-class FloatArgs:
-    exponent: int
-    mantissa: int
-    bits: Optional[int] = None
-    max: Optional[float] = None
-    min: Optional[float] = None
-    dtype: Optional[torch.dtype] = None
-
-
-class FP4_E2M1_DATA(FloatArgs):
+    # extra fields
     exponent = 2
     mantissa = 1
-    bits = 4
-    max = 6.0
-    min = -6.0
+
+    def cast(self, x: torch.Tensor) -> torch.Tensor:
+        return self.cast_to_fp4(x)
 
     @staticmethod
     @torch.compile
@@ -69,18 +69,19 @@ class FP4_E2M1_DATA(FloatArgs):
         return x * sign
 
 
-class FP8_E4M3_DATA(FloatArgs):
+class FP8_E4M3_DATA(torch.finfo):
+    bits = 8
+    min = torch.finfo(torch.float8_e4m3fn).min
+    max = torch.finfo(torch.float8_e4m3fn).max
+    eps = 0.125
+    tiny = 0.125
+    smallest_normal = 0.125
+    resolution = 0.125  # 2 ** (-mantissa)
+    dtype = str(torch.float8_e4m3fn)
+
+    # extra fields
     exponent = 4
     mantissa = 3
-    bits = 8
-    max = torch.finfo(torch.float8_e4m3fn).max
-    min = torch.finfo(torch.float8_e4m3fn).min
-    dtype = torch.float8_e4m3fn
-
-
-class BFLOAT16_DATA(FloatArgs):
-    exponent = 8
-    mantissa = 7
 
 
 class QuantizationType(str, Enum):
@@ -369,7 +370,7 @@ class QuantizationArgs(BaseModel, use_enum_values=True):
         model.zp_dtype = zp_dtype
         return model
 
-    def pytorch_dtype(self) -> torch.dtype:
+    def pytorch_dtype(self) -> Union[torch.dtype, FloatArgs]:
         if self.type == QuantizationType.FLOAT:
             if self.num_bits == 8:
                 return FP8_E4M3_DATA.dtype
@@ -384,6 +385,28 @@ class QuantizationArgs(BaseModel, use_enum_values=True):
                 return torch.int32
         else:
             raise ValueError(f"Invalid quantization type {self.type}")
+
+    @cached
+    def get_scale_info(self) -> torch.finfo | torch.iinfo:
+        if self.type == QuantizationType.INT:
+            # int4, int8
+            return torch.round(tensor)
+
+        elif self.type == QuantizationType.FLOAT:
+            # fp8
+            if args.num_bits == 8:
+                return tensor.to(FP8_E4M3_DATA.dtype)
+            
+            elif args.num_bits == 4:
+                # nvfp4
+                if args.scale_dtype == FP8_E4M3_DATA.dtype:
+                    return FP4_E2M1_DATA.cast_to_fp4(tensor)
+
+                # TODO: mxfp4
+                # if args.scale_dtype == FP8_E8M0_DATA.dtype:
+                #     return FP4_E2M1_DATA.cast_to_fp4(tensor)
+        
+        raise ValueError(f"Cannot get scale info for quantization args {self}")
 
     @deprecated("QuantizationArgs.observer")
     def get_observer(self) -> str:
@@ -401,38 +424,58 @@ def _round_dtype(tensor: torch.Tensor, dtype: torch.dtype):
         return torch.round(torch.clamp(tensor, iinfo.min, iinfo.max))
 
 
-def _round_args(tensor: torch.Tensor, args: QuantizationArgs):
-    if args.type == QuantizationType.FLOAT:
+def _round_or_cast(tensor: torch.Tensor, args: QuantizationArgs):
+    if args.type == QuantizationType.INT:
+        # int4, int8
+        return torch.round(tensor)
+
+    elif args.type == QuantizationType.FLOAT:
+        # fp8
         if args.num_bits == 8:
             return tensor.to(FP8_E4M3_DATA.dtype)
+        
         elif args.num_bits == 4:
-            return FP4_E2M1_DATA.cast_to_fp4(tensor)
-        else:
-            raise NotImplementedError("Only num_bits in (4, 8) are supported")
-    elif args.type == QuantizationType.INT:
-        return torch.round(tensor)
-    else:
-        raise ValueError(f"Invalid quantization type {args.type}")
+            # nvfp4
+            if args.scale_dtype == FP8_E4M3_DATA.dtype:
+                return FP4_E2M1_DATA.cast_to_fp4(tensor)
+
+            # TODO: mxfp4
+            # if args.scale_dtype == FP8_E8M0_DATA.dtype:
+            #     return FP4_E2M1_DATA.cast_to_fp4(tensor)
+    
+    raise ValueError(f"Cannot round/cast values for qargs {args}")
 
 
-def round_to_quantized_type(
-    tensor: torch.Tensor,
-    args: Optional[QuantizationArgs] = None,
-    dtype: Optional[torch.dtype] = None,
+def round_to_quantized_type(tensor: torch.Tensor, qdtype: torch.dtype | FloatArgs
 ) -> torch.Tensor:
     """
+    Round value to quantized dtype, maintaining the original dtype. Conceptually, this
+    is equivalent to "quantize-dequantize" without scales or zero points.
+
+    This function clamps values to the quantized range, casts to the quantized dtype,
+    then casts back to the original full precision dtype
+
     Rounds each element of the input tensor to the nearest quantized representation,
     keeping to original dtype. This can be done given QuantizationArgs or dtype
 
-    :param tensor: tensor to round
-    :param args: QuantizationArgs to pull appropriate dtype from
-    :param dtype: dtype to use for rounding
-    :return: rounded tensor
+    :param tensor: full precision tensor to round
+    :param args: quantization args specifying quantized dtype
+    :return: tensor whose values have been clamped and rounded to the quantized dtype
     """
-    original_dtype = tensor.dtype
-    if dtype is not None:
-        rounded = _round_dtype(tensor=tensor, dtype=dtype)
-    elif args is not None:
-        rounded = _round_args(tensor=tensor, args=args)
+    if tensor.dtype not in [
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    ]:
+        raise ValueError("Rounded tensor must be of full precision dtype")
 
-    return rounded.to(original_dtype)
+    # clamp
+    qmin, qmax = calculate_range(args.)
+    tensor = torch.clamp(tensor, qmin, qmax)
+
+    # round and cast
+    tensor = _round_or_cast(tensor, args)
+
+    # cast back to full precision
+    return rounded.to(tensor.dtype)

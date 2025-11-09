@@ -31,7 +31,6 @@ from compressed_tensors.quantization.quant_args import (
     QuantizationStrategy,
 )
 from compressed_tensors.quantization.quant_config import QuantizationStatus
-from compressed_tensors.quantization.utils.helpers import calculate_range
 from torch.nn import Linear
 
 
@@ -217,7 +216,6 @@ def test_process_quantization_block_static():
     num_cb = math.ceil(cols / bw)
     scale = torch.rand(num_rb, num_cb) + 0.1
     zp = torch.zeros_like(scale)
-    q_min, q_max = calculate_range(args, x.device)
     out = _process_quantization(
         x=x,
         scale=scale,
