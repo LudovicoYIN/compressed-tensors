@@ -17,6 +17,7 @@ from typing import List, Optional
 
 import torch
 from compressed_tensors.config import CompressionFormat
+from compressed_tensors.config.base import SparsityStructure
 from compressed_tensors.quantization.quant_args import (
     FP8_E4M3_DATA,
     DynamicType,
@@ -24,7 +25,7 @@ from compressed_tensors.quantization.quant_args import (
     QuantizationStrategy,
     QuantizationType,
 )
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 __all__ = [
@@ -51,48 +52,58 @@ class QuantizationScheme(BaseModel):
     weights: Optional[QuantizationArgs] = None
     input_activations: Optional[QuantizationArgs] = None
     output_activations: Optional[QuantizationArgs] = None
-    format: Optional[str] = None
+    sparsity_structure: SparsityStructure = SparsityStructure.UNSTRUCTURED
+    format: Optional[CompressionFormat] = None
+
+    @field_validator("input_activations", "output_activations", mode="after")
+    def validate_activations(self, args: Optional[QuantizationArgs]):
+        if args is None:
+            return
+
+        if args.strategy in (QuantizationStrategy.CHANNEL, QuantizationStrategy.BLOCK):
+            raise NotImplementedError(
+                f"{args.strategy} quantization is not supported for activations"
+            )
+
+        if args.strategy == QuantizationStrategy.GROUP and args.dynamic is True:
+            raise NotImplementedError(
+                "Static activation quantization is not supported for group strategy"
+            )
+
+        if args.actorder is not None:
+            raise ValueError("Cannot apply GPTQ actorder to activations")
+
+    @field_validator("weights", mode="after")
+    def validate_weights(self, args: Optional[QuantizationArgs]):
+        if args.dynamic is not False:
+            raise ValueError("Cannot apply dynamic quantization to weights")
+
+    @field_validator("format", mode="after")
+    def validate_format(self, format):
+        from compressed_tensors.compressors import ALL_FORMAT_NAMES, BaseCompressor
+
+        if format is None:
+            for name in ALL_FORMAT_NAMES:
+                compressor = BaseCompressor.get_value_from_registry(name)
+                if compressor.match_scheme(self):
+                    self.format = compressor.format
+            else:
+                # TODO: logger.warning("")
+                print(
+                    f"Unable to infer compression format for scheme {self}."
+                    "Your model may not have an associated kernel in vLLM"
+                )
+                self.format = CompressionFormat.dense.value
+
+        elif format == CompressionFormat.mixed_precision.value:
+            raise ValueError(
+                "mixed-precision cannot be set as a format for a QuantizationScheme"
+            )
 
     @model_validator(mode="after")
     def validate_model_after(model: "QuantizationScheme") -> "QuantizationScheme":
         inputs = model.input_activations
-        outputs = model.output_activations
         weights = model.weights
-        format = model.format
-
-        if inputs is not None:
-            if inputs.strategy not in (
-                QuantizationStrategy.TOKEN,
-                QuantizationStrategy.TENSOR,
-                QuantizationStrategy.GROUP,
-                QuantizationStrategy.TENSOR_GROUP,
-                QuantizationStrategy.ATTN_HEAD,
-            ):
-                if (
-                    inputs.strategy == QuantizationStrategy.GROUP
-                    and inputs.dynamic is True
-                ):
-                    raise NotImplementedError(
-                        "Static and local group-wise activation "
-                        "quantization is not supported"
-                    )
-
-                raise NotImplementedError(
-                    f"Using {inputs.strategy} strategy is not supported for "
-                    "activation quantization"
-                )
-
-            if inputs.actorder is not None:
-                raise ValueError("Cannot apply actorder to input activations")
-
-        if outputs is not None:
-            if outputs.actorder is not None:
-                raise ValueError("Cannot apply actorder to output activations")
-
-        if format == CompressionFormat.mixed_precision.value:
-            raise ValueError(
-                "mixed-precision cannot be set as a format for a QuantizationScheme"
-            )
 
         if (
             inputs
@@ -113,10 +124,7 @@ class QuantizationScheme(BaseModel):
 
         return model
 
-    model_config = ConfigDict(extra="forbid")
-
-
-"""
+    """
 Pre-Set Quantization Scheme Args
 """
 
