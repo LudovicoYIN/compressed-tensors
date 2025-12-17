@@ -18,8 +18,8 @@ from weakref import WeakValueDictionary
 
 import torch
 
-from ..utils import clone_to_device
-from .base import OffloadCache
+from compressed_tensors.offload.utils import send_tensors
+from compressed_tensors.offload.cache.base import OffloadCache
 
 
 class DeviceCache(OffloadCache):
@@ -59,7 +59,7 @@ class DeviceCache(OffloadCache):
         if key not in self.onload_values:
 
             # onload value from (cpu)
-            onloaded_value = clone_to_device(key, self.onload_device)
+            onloaded_value = send_tensors(key, device=self.onload_device, copy=True)
             self.onload_values[key] = onloaded_value
 
         else:

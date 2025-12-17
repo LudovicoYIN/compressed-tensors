@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import pytest
+import torch
+
 from compressed_tensors.offload.dispatch import dispatch_model
 from tests.testing_utils import requires_gpu
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -20,14 +22,21 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 @pytest.mark.integration
 @requires_gpu
-def test_dispatch_llama_1b():
-
-    model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
-    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
-
-    model = dispatch_model(model, "cuda:0", ["LlamaDecoderLayer"])
+@pytest.mark.parametrize("model_id", ["meta-llama/Llama-3.2-1B-Instruct"])
+def test_dispatch_llama_1b_logits_close(model_id):
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="cuda").eval()
 
     sample = tokenizer("Hello my name is", return_tensors="pt")
-    sample = {key: value.to("cuda:0") for key, value in sample.items()}
-    output = model.generate(**sample, max_new_tokens=15)
-    print(tokenizer.batch_decode(output))
+    sample = {k: v.to("cuda:0") for k, v in sample.items()}
+
+    with torch.inference_mode():
+        logits_before = model(**sample).logits
+
+    model = model.to("cpu")
+    model = dispatch_model(model, "cuda:0", ["LlamaDecoderLayer"])
+
+    with torch.inference_mode():
+        logits_after = model(**sample).logits
+
+    assert torch.allclose(logits_after, logits_before)

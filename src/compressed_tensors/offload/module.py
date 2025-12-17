@@ -17,8 +17,8 @@ from typing import Any
 
 import torch
 
-from .cache.base import OffloadCache
-from .utils import send_to_device
+from compressed_tensors.offload.cache.base import OffloadCache
+from compressed_tensors.offload.utils import send_tensors
 
 
 _offloaded_module_subclasses: dict[str, type] = dict()
@@ -98,8 +98,8 @@ class OffloadMixin(torch.nn.Module):
 
     def __call__(self, *args, **kwargs):
         args, kwargs = (
-            send_to_device(args, self._cache.onload_device),
-            send_to_device(kwargs, self._cache.onload_device),
+            send_tensors(args, device=self._cache.onload_device),
+            send_tensors(kwargs, device=self._cache.onload_device),
         )
 
         if self._no_split:
@@ -110,8 +110,8 @@ class OffloadMixin(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         args, kwargs = (
-            send_to_device(args, self._cache.onload_device),
-            send_to_device(kwargs, self._cache.onload_device),
+            send_tensors(args, device=self._cache.onload_device),
+            send_tensors(kwargs, device=self._cache.onload_device),
         )
 
         if self._no_split:
