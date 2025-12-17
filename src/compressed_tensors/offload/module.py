@@ -33,7 +33,7 @@ class OffloadMixin(torch.nn.Module):
         # instance attributes
         "_module",
         "_cache",
-        "_disable_offloading",
+        "_no_split",
         "_offload_names",
         "disable_offloading",
         "disable_onloading",
@@ -80,7 +80,7 @@ class OffloadMixin(torch.nn.Module):
             if old_value is not None:
                 self._cache[old_value] = value
 
-        self._module.__setattr__(name, value)
+        setattr(self._module, name, value)
 
     def __delattr__(self, name: str):
         if name in OffloadMixin._direct_attributes:
@@ -94,7 +94,7 @@ class OffloadMixin(torch.nn.Module):
 
             self._offload_names.remove(name)
 
-        self._module.__delattr__(name)
+        delattr(self._module, name)
 
     def __call__(self, *args, **kwargs):
         args, kwargs = (
