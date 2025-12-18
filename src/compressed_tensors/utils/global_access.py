@@ -45,7 +45,7 @@ class GlobalAccess(ABC, metaclass=GlobalAccessMeta):
         if len(cls._instances) > 1:
             raise ValueError(
                 f"Multiple instances of {cls} have been created, "
-                "please use `{cls}.instances`"
+                f"please use `{cls}.instances`"
             )
         return cls._instances[0]()
 

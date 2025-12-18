@@ -16,7 +16,7 @@ import contextlib
 from typing import Iterable, Iterator, Optional
 
 import torch
-from compressed_tensors.offload.cache import OffloadCache
+from compressed_tensors.offload.cache import DeviceCache, DiskCache
 from compressed_tensors.offload.dispatch import (  # noqa: F401
     dispatch_model,
     remove_dispatch,
@@ -34,7 +34,9 @@ __all__ = [
     "get_execution_device",
     "get_offloaded_device",
     "align_modules",
-    "register_offload_module" "align_module_device" "unwrap_offload",
+    "register_offload_module",
+    "align_module_device",
+    "unwrap_offload",
 ]
 
 
@@ -44,7 +46,9 @@ def disable_offloading():
     Keep modules onloaded and disable offloading until this context exits.
     """
     with contextlib.ExitStack() as stack:
-        for cache in OffloadCache.instances():
+        for cache in DeviceCache.instances():
+            stack.enter_context(cache.disable_offloading())
+        for cache in DiskCache.instances():
             stack.enter_context(cache.disable_offloading())
         yield
 
