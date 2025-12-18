@@ -24,7 +24,7 @@ from compressed_tensors.offload.utils import send_tensors
 _offloaded_module_subclasses: dict[str, type] = dict()
 
 
-class OffloadMixin(torch.nn.Module):
+class OffloadedModule(torch.nn.Module):
     _direct_attributes = {
         # core attributes
         "__class__",
@@ -56,7 +56,7 @@ class OffloadMixin(torch.nn.Module):
         self._modules = module.__dict__["_modules"]
 
     def __getattribute__(self, name: str) -> object:
-        if name in OffloadMixin._direct_attributes:
+        if name in OffloadedModule._direct_attributes:
             return object.__getattribute__(self, name)
 
         elif name in self._offload_names:
@@ -71,7 +71,7 @@ class OffloadMixin(torch.nn.Module):
             return getattr(self._module, name)
 
     def __setattr__(self, name: str, value: Any):
-        if name in OffloadMixin._direct_attributes:
+        if name in OffloadedModule._direct_attributes:
             return object.__setattr__(self, name, value)
 
         elif name in self._offload_names:
@@ -83,7 +83,7 @@ class OffloadMixin(torch.nn.Module):
         setattr(self._module, name, value)
 
     def __delattr__(self, name: str):
-        if name in OffloadMixin._direct_attributes:
+        if name in OffloadedModule._direct_attributes:
             return object.__delattr__(self, name)
 
         elif name in self._offload_names:
@@ -150,7 +150,7 @@ class OffloadMixin(torch.nn.Module):
 
 
 def make_offload_module_subclass(parent_cls: type) -> type:
-    subclass = type(f"Offloaded{parent_cls.__name__}", (OffloadMixin, parent_cls), {})
+    subclass = type(f"Offloaded{parent_cls.__name__}", (OffloadedModule, parent_cls), {})
     subclass.__name__ = parent_cls.__name__
 
     assert issubclass(subclass, parent_cls)

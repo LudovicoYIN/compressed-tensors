@@ -20,7 +20,7 @@ from typing import TypeVar
 import torch
 
 from .cache import DeviceCache
-from .module import OffloadMixin
+from .module import OffloadedModule
 
 
 ModelType = TypeVar("", bound=torch.nn.Module)
@@ -51,7 +51,7 @@ def dispatch_model(
             continue
 
         no_split = module.__class__.__name__ in no_split_modules
-        offloaded_module = OffloadMixin.from_module(module, cache, no_split)
+        offloaded_module = OffloadedModule.from_module(module, cache, no_split)
 
         model.set_submodule(name, offloaded_module)
         memo[module] = offloaded_module
@@ -62,14 +62,14 @@ def dispatch_model(
 def update_offload_parameter(module: torch.nn.Module, name: str, data: torch.Tensor):
     with (
         module.disable_onloading()
-        if isinstance(module, OffloadMixin)
+        if isinstance(module, OffloadedModule)
         else nullcontext()
     ):
         getattr(module, name).copy_(data)
 
 
 def get_execution_device(module: torch.nn.Module) -> torch.device | str:
-    if isinstance(module, OffloadMixin):
+    if isinstance(module, OffloadedModule):
         return module.execution_device()
 
     else:

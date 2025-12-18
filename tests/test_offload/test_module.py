@@ -18,7 +18,7 @@ from weakref import ref
 import pytest
 import torch
 from compressed_tensors.offload.cache.device import DeviceCache
-from compressed_tensors.offload.module import OffloadMixin
+from compressed_tensors.offload.module import OffloadedModule
 from tests.testing_utils import requires_gpu
 
 
@@ -46,7 +46,7 @@ def test_onloading(linear: torch.nn.Linear, cache: DeviceCache):
     weight = linear.weight
     bias = linear.bias
 
-    linear = OffloadMixin.from_module(linear, cache)
+    linear = OffloadedModule.from_module(linear, cache)
 
     onloaded_weight = linear.weight
     onloaded_bias = linear.bias
@@ -63,7 +63,7 @@ def test_onloading(linear: torch.nn.Linear, cache: DeviceCache):
 @pytest.mark.unit
 @requires_gpu
 def test_garbage_collect(linear: torch.nn.Linear, cache: DeviceCache):
-    linear = OffloadMixin.from_module(linear, cache)
+    linear = OffloadedModule.from_module(linear, cache)
     weight_ref = ref(linear.weight)
     bias_ref = ref(linear.bias)
 
@@ -77,7 +77,7 @@ def test_garbage_collect(linear: torch.nn.Linear, cache: DeviceCache):
 @pytest.mark.unit
 @requires_gpu
 def test_disable_offloading(linear: torch.nn.Linear, cache: DeviceCache):
-    linear = OffloadMixin.from_module(linear, cache)
+    linear = OffloadedModule.from_module(linear, cache)
 
     outside_onloaded = linear.weight
     outside_onloaded_ref = ref(outside_onloaded)
@@ -103,7 +103,7 @@ def test_disable_offloading(linear: torch.nn.Linear, cache: DeviceCache):
 @requires_gpu
 def test_disable_onloading(linear: torch.nn.Linear, cache: DeviceCache):
     weight = linear.weight
-    linear = OffloadMixin.from_module(linear, cache)
+    linear = OffloadedModule.from_module(linear, cache)
 
     with cache.disable_onloading():
         onloaded = linear.weight
@@ -118,7 +118,7 @@ def test_disable_onloading(linear: torch.nn.Linear, cache: DeviceCache):
 def test_forward(
     linear: torch.nn.Linear, cache: DeviceCache, input: torch.Tensor, disable_offloading
 ):
-    linear = OffloadMixin.from_module(linear, cache)
+    linear = OffloadedModule.from_module(linear, cache)
 
     output = linear.forward(input)
     output.device == DEVICE
@@ -135,7 +135,7 @@ def test_forward(
 #         def forward(self, input: torch.Tensor):
 #             pass
 
-#     linear = OffloadMixin.from_module(linear, cache)
+#     linear = OffloadedModule.from_module(linear, cache)
 
 
 # pytest.mark.parametrize("with_offloading", [True, False])
@@ -145,7 +145,7 @@ def test_forward(
 @pytest.mark.unit
 @requires_gpu
 def test_delete(linear: torch.nn.Linear, cache: DeviceCache):
-    linear = OffloadMixin.from_module(linear, cache)
+    linear = OffloadedModule.from_module(linear, cache)
     weight_ref = ref(linear.weight)
     bias_ref = ref(linear.bias)
 
