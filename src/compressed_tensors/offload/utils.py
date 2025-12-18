@@ -13,13 +13,20 @@
 # limitations under the License.
 
 from dataclasses import fields, is_dataclass
+from itertools import chain
 from typing import Optional, TypeVar
 
 import torch
 from loguru import logger
 
 
-__all__ = ["send_tensors", "get_module_device", "move_module_tensor"]
+__all__ = [
+    "send_tensors",
+    "get_module_device",
+    "move_module_tensor",
+    "module_nbytes",
+    "module_to",
+]
 
 T = TypeVar("T")
 
@@ -75,3 +82,36 @@ def move_module_tensor(
         param = module._buffers[name]
         new_buff = param.__class__(param.to(device), requires_grad=param.requires_grad)
         module._buffers[name] = new_buff
+
+
+def module_nbytes(module: torch.nn.Module) -> tuple[int, int]:
+    direct = sum(
+        (
+            param.nbytes
+            for param in chain(
+                module.parameters(recurse=False), module.buffers(recurse=False)
+            )
+        ),
+        0,
+    )
+    total = sum(
+        (
+            param.nbytes
+            for param in chain(
+                module.parameters(recurse=True), module.buffers(recurse=True)
+            )
+        ),
+        0,
+    )
+    return direct, total
+
+
+def module_to(
+    module: torch.nn.Module, device: torch.device, recurse: bool = False
+) -> torch.nn.Module:
+    if recurse:
+        return module.to(device)
+    else:
+        for name in chain(module._parameters.keys(), module._buffers.keys()):
+            move_module_tensor(module, name, device)
+        return module

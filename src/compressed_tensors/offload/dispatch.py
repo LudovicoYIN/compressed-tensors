@@ -13,20 +13,19 @@
 # limitations under the License.
 
 from collections.abc import Container
-from itertools import chain
-from typing import Literal, Optional, TypeVar
 from dataclasses import dataclass
+from typing import Literal, Optional, TypeVar
 
 import torch
 from compressed_tensors.offload.cache import OffloadCache
 from compressed_tensors.offload.module import OffloadedModule
-from compressed_tensors.offload.utils import move_module_tensor
+from compressed_tensors.offload.utils import module_nbytes, module_to
 from compressed_tensors.utils import getattr_chain
 from loguru import logger
 from transformers import PreTrainedModel
 
 
-__all__ = ["offload_model", "dispatch_model", "remove_dispatch"]
+__all__ = ["offload_model", "dispatch_model", "remove_dispatch", "get_device_memory"]
 
 ModelType = TypeVar("", bound=torch.nn.Module)
 
@@ -181,39 +180,6 @@ def get_device_memory(hint_extra_memory: int) -> list[DeviceMemory]:
             )
         )
     return devices
-
-
-def module_nbytes(module: torch.nn.Module) -> tuple[int, int]:
-    direct = sum(
-        (
-            param.nbytes
-            for param in chain(
-                module.parameters(recurse=False), module.buffers(recurse=False)
-            )
-        ),
-        0,
-    )
-    total = sum(
-        (
-            param.nbytes
-            for param in chain(
-                module.parameters(recurse=True), module.buffers(recurse=True)
-            )
-        ),
-        0,
-    )
-    return direct, total
-
-
-def module_to(
-    module: torch.nn.Module, device: torch.device, recurse: bool = False
-) -> torch.nn.Module:
-    if recurse:
-        return module.to(device)
-    else:
-        for name in chain(module._parameters.keys(), module._buffers.keys()):
-            move_module_tensor(module, name, device)
-        return module
 
 
 def remove_dispatch(module: torch.nn.Module) -> torch.nn.Module:
