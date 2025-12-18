@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from contextlib import contextmanager
-from typing import Any
+from typing import Any, TypeVar
 
 import torch
 from compressed_tensors.offload.cache.base import OffloadCache
@@ -21,6 +20,8 @@ from compressed_tensors.offload.utils import send_tensors
 
 
 _offloaded_module_subclasses: dict[str, type] = dict()
+
+ModuleType = TypeVar("ModuleType", bound=torch.nn.Module)
 
 
 class OffloadedModule(torch.nn.Module):
@@ -119,23 +120,13 @@ class OffloadedModule(torch.nn.Module):
         else:
             return self._module.forward.__func__(self, *args, **kwargs)
 
-    @contextmanager
-    def disable_offloading(self):
-        with self._cache.disable_offloading(self):
-            yield
-
-    @contextmanager
-    def disable_onloading(self):
-        with self._cache.disable_onloading(self):
-            yield
-
     @classmethod
     def from_module(
         cls,
-        module: torch.nn.Module,
+        module: ModuleType,
         cache: OffloadCache,
         no_split: bool = False,
-    ):
+    ) -> ModuleType:
         class_name = module.__class__.__name__
         if class_name not in _offloaded_module_subclasses:
             _offloaded_module_subclasses[class_name] = make_offload_module_subclass(

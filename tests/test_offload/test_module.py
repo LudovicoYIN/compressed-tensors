@@ -124,24 +124,6 @@ def test_forward(
     output.device == DEVICE
 
 
-# @pytest.mark.unit
-# @requires_gpu
-# def test_forward_disable_offload():
-#     class MyModule(torch.nn.Module):
-#         def __init__(self):
-#             super.__init__(self)
-#             self.a = torch.nn.Parameter(torch.zeros(6), requires_grad=False)
-
-#         def forward(self, input: torch.Tensor):
-#             pass
-
-#     linear = OffloadedModule.from_module(linear, cache)
-
-
-# pytest.mark.parametrize("with_offloading", [True, False])
-# def test_call():
-
-
 @pytest.mark.unit
 @requires_gpu
 def test_delete(linear: torch.nn.Linear, cache: DeviceCache):
@@ -155,3 +137,30 @@ def test_delete(linear: torch.nn.Linear, cache: DeviceCache):
 
     assert weight_ref() is None
     assert bias_ref() is None
+
+
+@pytest.mark.unit
+@requires_gpu
+@pytest.mark.parametrize("disable_offloading", [True, False])
+def test_forward_call(cache, disable_offloading):
+    linear = torch.nn.Linear(5, 5)
+    linear = OffloadedModule.from_module(linear, cache, disable_offloading)
+
+    with torch.no_grad():
+        input = torch.zeros(5, device="cpu")
+        output = linear.forward(input)
+        assert output.device == DEVICE
+
+        def pre_hook(module, args, *_):
+            assert args[0].device == DEVICE
+            assert module._cache.offloading_disabled == disable_offloading
+
+        def post_hook(module, args, *_):
+            assert args[0].device == DEVICE
+            assert module._cache.offloading_disabled == disable_offloading
+
+        linear.register_forward_pre_hook(pre_hook)
+        linear.register_forward_hook(post_hook)
+
+        output = linear(input)
+        assert output.device == DEVICE
