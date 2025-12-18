@@ -21,6 +21,8 @@ from .cache import DeviceCache
 from .module import OffloadedModule
 
 
+__all__ = ["dispatch_model", "remove_dispatch"]
+
 ModelType = TypeVar("", bound=torch.nn.Module)
 
 
@@ -38,10 +40,11 @@ def dispatch_model(
             "this function and its usages to use the new, wrapped root"
         )
 
+    model = remove_dispatch(model)
+
     # each model shares a single shared cache because we have to
     # coordinate the onloading of shared tensors within the model
     cache = DeviceCache(device)
-
     memo = dict()
     for name, module in model.named_modules(remove_duplicate=False):
         # exclude wrapping the root
@@ -55,3 +58,20 @@ def dispatch_model(
         memo[module] = offloaded_module
 
     return model
+
+
+def remove_dispatch(module: torch.nn.Module) -> torch.nn.Module:
+    """
+    Remove any existing dispatches from module
+
+    :param module: module which may be dispatched with hf hooks
+    :return: module without dispatch
+    """
+    for name, submodule in module.named_modules():
+        if isinstance(submodule, OffloadedModule):
+            if name == "":
+                module = submodule._module
+            else:
+                module.set_submodule(name, submodule._module)
+
+    return module

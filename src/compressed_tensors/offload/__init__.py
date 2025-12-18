@@ -17,7 +17,10 @@ from typing import Iterable, Iterator, Optional
 
 import torch
 from compressed_tensors.offload.cache import OffloadCache
-from compressed_tensors.offload.dispatch import dispatch_model
+from compressed_tensors.offload.dispatch import (  # noqa: F401
+    dispatch_model,
+    remove_dispatch,
+)
 from compressed_tensors.offload.module import OffloadedModule
 from compressed_tensors.offload.utils import get_module_device, move_module_tensor
 from compressed_tensors.utils.helpers import patch_attr
@@ -25,12 +28,25 @@ from compressed_tensors.utils.helpers import patch_attr
 
 __all__ = [
     "dispatch_model",
+    "remove_dispatch" "disable_onloading",
+    "disable_offloading",
     "update_offload_parameter",
     "get_execution_device",
-    "disable_offloading",
-    "register_offload_module",
-    "disable_onloading",
+    "get_offloaded_device",
+    "align_modules",
+    "register_offload_module" "align_module_device" "unwrap_offload",
 ]
+
+
+@contextlib.contextmanager
+def disable_offloading():
+    """
+    Keep modules onloaded and disable offloading until this context exits.
+    """
+    with contextlib.ExitStack() as stack:
+        for cache in OffloadCache.instances():
+            stack.enter_context(cache.disable_offloading())
+        yield
 
 
 def update_offload_parameter(module: torch.nn.Module, name: str, data: torch.Tensor):
@@ -75,6 +91,9 @@ def get_offloaded_device(module: torch.nn.Module) -> torch.device:
         return get_module_device(module)
 
 
+""" Implemented for backwards compatibility """
+
+
 @contextlib.contextmanager
 def align_modules(
     modules: torch.nn.Module | Iterable[torch.nn.Module],
@@ -103,34 +122,6 @@ def register_offload_module(base: torch.nn.Module, name: str, module: torch.nn.M
     if isinstance(base, OffloadedModule):
         offloaded = OffloadedModule.from_module(module, base._cache, no_split=False)
         base.register_module(name, offloaded)
-
-
-@contextlib.contextmanager
-def disable_offloading():
-    """
-    Keep modules onloaded and disable offloading until this context exits.
-    """
-    with contextlib.ExitStack() as stack:
-        for cache in OffloadCache.instances():
-            stack.enter_context(cache.disable_offloading())
-        yield
-
-
-def remove_dispatch(module: torch.nn.Module) -> torch.nn.Module:
-    """
-    Remove any existing dispatches from module
-
-    :param module: module which may be dispatched with hf hooks
-    :return: module without dispatch
-    """
-    for name, submodule in module.named_modules():
-        if isinstance(submodule, OffloadedModule):
-            if name == "":
-                module = submodule._module
-            else:
-                module.set_submodule(name, submodule._module)
-
-    return module
 
 
 @contextlib.contextmanager
