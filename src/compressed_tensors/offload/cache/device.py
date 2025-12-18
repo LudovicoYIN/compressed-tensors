@@ -85,7 +85,11 @@ class DeviceCache(OffloadCache):
             self.keep_onloaded_values.remove(self.onload_values[key])
 
     def offload(self, value: torch.Tensor) -> torch.Tensor:
-        # return offloaded tensor
+        # return original tensor if onloading is disabled
+        # to allow for direct parameter assignment
+        if self.onloading_disabled:
+            return value
+
         return send_tensors(value, device=self.offload_device, copy=True)
 
     @contextlib.contextmanager

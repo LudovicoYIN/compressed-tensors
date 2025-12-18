@@ -43,26 +43,36 @@ class OffloadCache(GlobalAccess, ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def offload(self, key: torch.Tensor) -> torch.Tensor:
+    def offload(self, value: torch.Tensor) -> torch.Tensor:
         """
-        TODO
-        FYI cache cannot be responsible for offloading
-        unless maybe implement a new method
+        Given a (maybe) onloaded value, returns the offloaded version
+        of that tensor. For example:
 
-        DeviceCache:
-        cpu_tensor = cache.offload(gpu_tensor)
+        DeviceCache: `cpu_tensor = cache.offload(gpu_tensor)`
 
-        DiskCache:
-        meta_tensor = cache.offload(gpu_tensor)
+        DiskCache: `meta_tensor = cache.offload(gpu_tensor)`
+
+        :param value: parameter to offload
+        :return: offloaded version of parameter
         """
         raise NotImplementedError()
 
     @abstractmethod
     def disable_offloading(self):
+        """
+        Context to disable all offloading for offloaded modules which share this cache.
+        After a weight has been fetched once, that onloaded value is cached and
+        subsequent fetches will leverage the cache, reducing device movement
+        """
         raise NotImplementedError()
 
     @abstractmethod
     def disable_onloading(self):
+        """
+        Context to disable all onloading for offloaded modules which share this cache.
+        This is mostly used for debugging purposes, and allows the caller to directly
+        inspect offloaded tensors and directly assign offloaded tensors without copying
+        """
         raise NotImplementedError()
 
     def __setitem__(self, key: torch.Tensor, value: Any):

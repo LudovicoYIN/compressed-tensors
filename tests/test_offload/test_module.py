@@ -105,6 +105,11 @@ def test_disable_onloading(linear: torch.nn.Linear | OffloadedModule):
         weight = linear.weight
         assert weight is offloaded_weight
 
+        # new parameter assignments are direct
+        new_param = torch.nn.Parameter(torch.ones(5, device=ONLOAD_DEVICE))
+        linear.new_param = new_param
+        assert linear.new_param is new_param
+
     assert weight is offloaded_weight
 
 
