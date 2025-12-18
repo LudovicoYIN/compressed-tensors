@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from collections.abc import Container
-from typing import TypeVar
+from typing import Optional, TypeVar
 
 import torch
 
@@ -28,7 +28,8 @@ ModelType = TypeVar("", bound=torch.nn.Module)
 
 def dispatch_model(
     model: ModelType,
-    device: torch.device | str,
+    onload_device: torch.device | str,
+    offload_device: Optional[torch.device | str] = None,
     no_split_modules: Container[str] = tuple(),
 ) -> ModelType:
     if len(model._parameters) > 0:
@@ -44,7 +45,7 @@ def dispatch_model(
 
     # each model shares a single shared cache because we have to
     # coordinate the onloading of shared tensors within the model
-    cache = DeviceCache(device)
+    cache = DeviceCache(onload_device, offload_device)
     memo = dict()
     for name, module in model.named_modules(remove_duplicate=False):
         # exclude wrapping the root

@@ -21,12 +21,13 @@ from compressed_tensors.offload.cache.device import DeviceCache
 from tests.testing_utils import requires_gpu
 
 
-DEVICE = torch.device("cuda:0")
+ONLOAD_DEVICE = torch.device("cuda:0")
+OFFLOAD_DEVICE = torch.device("cpu")
 
 
 @pytest.fixture(scope="function")
 def cache():
-    return DeviceCache(DEVICE)
+    return DeviceCache(ONLOAD_DEVICE, OFFLOAD_DEVICE)
 
 
 @pytest.mark.unit
@@ -53,17 +54,25 @@ def test_garbage_collect(cache: DeviceCache):
 
 @pytest.mark.unit
 @requires_gpu
+def test_offload(cache: DeviceCache):
+    tensor = torch.ones(10, device=ONLOAD_DEVICE)
+    offloaded = cache.offload(tensor)
+    assert offloaded.device == OFFLOAD_DEVICE
+
+
+@pytest.mark.unit
+@requires_gpu
 def test_disable_offloading(cache: DeviceCache):
     tensor = torch.ones(10)
 
     outside_onloaded = cache[tensor]
     outside_onloaded_ref = ref(outside_onloaded)
-    assert outside_onloaded.device == DEVICE
+    assert outside_onloaded.device == ONLOAD_DEVICE
 
     with cache.disable_offloading():
         inside_onloaded = cache[tensor]
         inside_onloaded_ref = ref(inside_onloaded)
-        assert inside_onloaded.device == DEVICE
+        assert inside_onloaded.device == ONLOAD_DEVICE
 
         del outside_onloaded
         del inside_onloaded

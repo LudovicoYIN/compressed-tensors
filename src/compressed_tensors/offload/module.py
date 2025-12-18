@@ -35,13 +35,12 @@ class OffloadedModule(torch.nn.Module):
         "_module",
         "_cache",
         "_no_split",
-        "_offload_names",
+        "register_parameter",
         "disable_offloading",
         "disable_onloading",
-        # these functions will return the wrapped `_module` unless we call with self
-        "modules",
+        # these functions should return wrapped modules :. are called with wrapped self
         "named_modules",
-        "_modules",
+        "modules",
         # call path
         "__call__",
         "_compiled_call_impl",
@@ -53,14 +52,12 @@ class OffloadedModule(torch.nn.Module):
         self._module = module
         self._cache = cache
         self._no_split = no_split
-        self._offload_names = set(module.__dict__["_parameters"].keys())
-        self._modules = module.__dict__["_modules"]
 
     def __getattribute__(self, name: str) -> object:
         if name in OffloadedModule._direct_attributes:
             return object.__getattribute__(self, name)
 
-        elif name in self._offload_names:
+        elif name in self._module._parameters:
             value = self._module._parameters[name]
 
             if value is not None:
@@ -75,29 +72,35 @@ class OffloadedModule(torch.nn.Module):
         if name in OffloadedModule._direct_attributes:
             return object.__setattr__(self, name, value)
 
-        # TODO: if it's a tensor, offload it first!
+        elif isinstance(value, torch.nn.Parameter):
+            self.register_parameter(name, value)
 
-        elif name in self._offload_names:
-            old_value = self._module._parameters[name]
-
-            if old_value is not None:
-                self._cache[old_value] = value
-
-        setattr(self._module, name, value)
+        else:
+            setattr(self._module, name, value)
 
     def __delattr__(self, name: str):
         if name in OffloadedModule._direct_attributes:
             return object.__delattr__(self, name)
 
-        elif name in self._offload_names:
+        elif name in self._module._parameters:
             old_value = self._module._parameters[name]
 
             if old_value is not None:
                 del self._cache[old_value]
 
-            self._offload_names.remove(name)
-
         delattr(self._module, name)
+
+    def register_parameter(self, name: str, param: torch.nn.Parameter | None):
+        if isinstance(param, torch.nn.Parameter):
+            param = self._cache.offload(param)
+
+        if name in self._module._parameters:
+            old_value = self._module._parameters[name]
+
+            if old_value is not None:
+                del self._cache[old_value]
+
+        self._module.register_parameter(name, param)
 
     def __call__(self, *args, **kwargs):
         args, kwargs = (

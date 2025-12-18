@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 import torch
 from compressed_tensors.utils.global_access import GlobalAccess
@@ -20,8 +21,8 @@ from compressed_tensors.utils.global_access import GlobalAccess
 
 class OffloadCache(GlobalAccess, ABC):
     """
-    Abstract base class for offload cache. Tensors put into the cache become offloaded,
-    while tensors retrieved from the cache are onloaded.
+    Abstract base class for offload cache. Tensors are put into the cache via `offload`,
+    and tensors are retrieved from the cache via `__getitem__`.
     """
 
     onload_device: torch.device | str
@@ -42,7 +43,7 @@ class OffloadCache(GlobalAccess, ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def __setitem__(self, key: torch.Tensor, value: torch.Tensor | None):
+    def offload(self, key: torch.Tensor) -> torch.Tensor:
         """
         TODO
         FYI cache cannot be responsible for offloading
@@ -63,3 +64,9 @@ class OffloadCache(GlobalAccess, ABC):
     @abstractmethod
     def disable_onloading(self):
         raise NotImplementedError()
+
+    def __setitem__(self, key: torch.Tensor, value: Any):
+        raise ValueError(
+            "Cannot set item for OffloadCache. "
+            "Please use `OffloadCache.offload` instead"
+        )
