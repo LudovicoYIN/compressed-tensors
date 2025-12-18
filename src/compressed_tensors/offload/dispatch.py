@@ -14,7 +14,8 @@
 
 from collections.abc import Container
 from itertools import chain
-from typing import Literal, NamedTuple, Optional, TypeVar
+from typing import Literal, Optional, TypeVar
+from dataclasses import dataclass
 
 import torch
 from compressed_tensors.offload.cache import OffloadCache
@@ -160,7 +161,8 @@ def dispatch_model(
     return dfs(model)
 
 
-class DeviceMemory(NamedTuple):
+@dataclass
+class DeviceMemory:
     device: torch.device | str
     memory: int
 

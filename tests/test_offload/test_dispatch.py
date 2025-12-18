@@ -25,7 +25,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 @torch.inference_mode()
 def test_offload_and_dispatch_model(model_id):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="cuda").eval()
+    model = AutoModelForCausalLM.from_pretrained(model_id).to("cuda").eval()
 
     sample = tokenizer("Hello my name is", return_tensors="pt")
     sample = {k: v.to("cuda:0") for k, v in sample.items()}

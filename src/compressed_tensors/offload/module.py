@@ -95,7 +95,11 @@ class OffloadedModule(torch.nn.Module):
         if isinstance(param, torch.nn.Parameter):
             param = self._cache.offload(param)
 
-        delattr(self, name)
+        if (old_value := self._module._parameters.get(name, None)) is not None:
+            del self._cache[old_value]
+
+        if (old_value := self._module._buffers.get(name, None)) is not None:
+            del self._cache[old_value]
 
         self._module.register_parameter(name, param)
 
