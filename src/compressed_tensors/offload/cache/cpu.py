@@ -21,23 +21,32 @@ from compressed_tensors.offload.utils import send_tensors
 
 class CPUCache(OffloadCache):
     """
-    The device cache handles the onloading of tensors from an offload device to
-    an onload device.
-
-    When used with module offloading,
-    assumes that the model starts on the offload device
+    Handles offloading and onloading tensors from/to cpu memory
 
     Note: This cache does not currently handle propagation of in-place
     operations on the onloaded tensors. Future work could support this by
-    returning a tensor subclass which references on offloaded tensor.
+    returning a tensor subclass which references on offloaded tensor. To update
+    parameters, use `compressed_tensors.offload::update_offload_parameter`
     """
 
     offload_device: Optional[torch.device | str] = torch.device("cpu")
 
     def onload(self, key: torch.Tensor) -> torch.Tensor:
+        """
+        Onload a tensor from cpu to device
+
+        :param key: cpu tensor to onload
+        :return: device tensor
+        """
         return send_tensors(key, device=self.onload_device, copy=True)
 
     def offload(self, value: torch.Tensor) -> torch.Tensor:
+        """
+        Offload a tensor from any device to cpu
+
+        :param value: tensor on any device
+        :return: tensor on cpu
+        """
         # return original tensor if onloading is disabled
         # to allow for direct parameter/buffer assignment
         if self.onloading_disabled:

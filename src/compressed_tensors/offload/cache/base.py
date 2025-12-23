@@ -26,6 +26,13 @@ class OffloadCache(GlobalAccess, ABC):
     """
     Abstract base class for offload cache. Tensors are made ready for caching via
     `offload`, updated via `__setitem__`, and retrieved via `__getitem__`.
+
+    Subclasses must implement `onload` and `offload`.
+
+    Note: This cache does not currently handle propagation of in-place
+    operations on the onloaded tensors. Future work could support this by
+    returning a tensor subclass which references on offloaded tensor. To update
+    parameters, use `compressed_tensors.offload::update_offload_parameter`
     """
 
     onload_device: torch.device | str
