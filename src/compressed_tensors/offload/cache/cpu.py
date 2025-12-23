@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import contextlib
-from weakref import WeakValueDictionary
+from typing import Optional
 
 import torch
 from compressed_tensors.offload.cache.base import OffloadCache
@@ -33,58 +32,10 @@ class CPUCache(OffloadCache):
     returning a tensor subclass which references on offloaded tensor.
     """
 
-    def __init__(self, onload_device: torch.device | str):
-        self.onload_device = onload_device
-        self.offload_device = torch.device("cpu")
+    offload_device: Optional[torch.device | str] = torch.device("cpu")
 
-        # flags for disabling
-        self.onloading_disabled: bool = False
-        self.offloading_disabled: bool = False
-
-        # onloaded values cache
-        self.onload_values: WeakValueDictionary[
-            torch.Tensor, torch.Tensor
-        ] = WeakValueDictionary()  # offloaded tensors -> onloaded tensors
-
-        # strong ref to values to disable offloading
-        self.keep_onloaded_values: set[torch.Tensor] = set()
-
-    def __getitem__(self, key: torch.Tensor) -> torch.Tensor:
-        # return original tensor if onloading is disabled
-        if self.onloading_disabled:
-            return key
-
-        # onload value, potentially from cache
-        if key not in self.onload_values:
-
-            # onload value from (cpu)
-            onloaded_value = send_tensors(key, device=self.onload_device, copy=True)
-            self.onload_values[key] = onloaded_value
-
-        else:
-            onloaded_value = self.onload_values[key]
-
-        # if offloading is disabled, keep a strong reference (to keep the value alive)
-        if self.offloading_disabled:
-            self.keep_onloaded_values.add(onloaded_value)
-
-        return onloaded_value
-
-    def __setitem__(self, key: torch.Tensor, value: torch.Tensor):
-        # invalidate onloaded values
-        del self[key]
-
-        # update data
-        key.copy_(value)
-
-    def __delitem__(self, key: torch.Tensor):
-        # remove any strong references to onloaded values
-        if (
-            self.offloading_disabled
-            and key in self.onload_values
-            and self.onload_values[key] in self.keep_onloaded_values
-        ):
-            self.keep_onloaded_values.remove(self.onload_values[key])
+    def onload(self, key: torch.Tensor) -> torch.Tensor:
+        return send_tensors(key, device=self.onload_device, copy=True)
 
     def offload(self, value: torch.Tensor) -> torch.Tensor:
         # return original tensor if onloading is disabled
@@ -93,23 +44,3 @@ class CPUCache(OffloadCache):
             return value
 
         return send_tensors(value, device=self.offload_device, copy=True)
-
-    @contextlib.contextmanager
-    def disable_offloading(self):
-        if not self.offloading_disabled:
-            self.offloading_disabled = True
-            self.keep_onloaded_values.update(self.onload_values.values())
-            yield
-            self.offloading_disabled = False
-            self.keep_onloaded_values.clear()
-        else:
-            yield
-
-    @contextlib.contextmanager
-    def disable_onloading(self):
-        if not self.onloading_disabled:
-            self.onloading_disabled = True
-            yield
-            self.onloading_disabled = False
-        else:
-            yield
