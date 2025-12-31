@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import contextlib
+from collections.abc import MutableMapping
 from abc import ABC, abstractmethod
 from typing import Literal, Optional
 from weakref import WeakValueDictionary
@@ -22,19 +23,7 @@ import torch.distributed as dist
 from compressed_tensors.utils.global_access import GlobalAccess
 
 
-class OffloadCache(GlobalAccess, ABC):
-    """
-    Abstract base class for offload cache. Tensors are made ready for caching via
-    `offload`, updated via `__setitem__`, and retrieved via `__getitem__`.
-
-    Subclasses must implement `onload` and `offload`.
-
-    Note: This cache does not currently handle propagation of in-place
-    operations on the onloaded tensors. Future work could support this by
-    returning a tensor subclass which references on offloaded tensor. To update
-    parameters, use `compressed_tensors.offload::update_offload_parameter`
-    """
-
+class OffloadCache(GlobalAccess, MutableMapping):
     onload_device: torch.device | str
     offload_device: Optional[torch.device | str]
 
@@ -62,9 +51,9 @@ class OffloadCache(GlobalAccess, ABC):
         self.onload_device = onload_device
         self.offload_device = torch.device("cpu")
 
-        # flags for disabling
-        self.onloading_disabled: bool = False
-        self.offloading_disabled: bool = False
+        # names -> offloaded tensors
+        self.module = None
+        self.offloaded_values: dict[tuple[torch.nn.Module, str], torch.Tensor] = dict()
 
         # offloaded tensors -> onloaded tensors
         self.onload_values: WeakValueDictionary[
@@ -74,6 +63,18 @@ class OffloadCache(GlobalAccess, ABC):
         # strong ref to values to disable offloading
         self.keep_onloaded_values: set[torch.Tensor] = set()
 
+    def curry_module(self, module: torch.nn.Module):
+        copy = self.__class__(onload_device=self.onload_device)
+        copy.onload_device = self.onload_device
+        copy.offload_device = self.offload_device
+        copy.offloaded_values = self.offloaded_values
+        copy.onload_values = self.onload_values
+        copy.keep_onloaded_values = self.keep_onloaded_values
+
+        copy.module = module  # change prefix, shallow copy rest
+
+        return copy
+
     @abstractmethod
     def onload(self, key: torch.Tensor) -> torch.Tensor:
         """
@@ -82,6 +83,7 @@ class OffloadCache(GlobalAccess, ABC):
         :param key: offloaded tensor
         :return: onloaded tensor
         """
+        # IMPL: return send_tensors(key, device=self.onload_device, copy=True)
         raise NotImplementedError()
 
     @abstractmethod
@@ -92,82 +94,51 @@ class OffloadCache(GlobalAccess, ABC):
         :param key: tensor to offload
         :return: offloaded tensor
         """
+        # IMPL: return send_tensors(value, device=self.offload_device, copy=True)
         raise NotImplementedError()
 
-    def __getitem__(self, key: torch.Tensor) -> torch.Tensor:
+    def __getitem__(self, key: str) -> torch.Tensor:
         """
         :param key: offloaded tensor to be onloaded
         :return: onloaded tensor
         """
-        # return original tensor if onloading is disabled
-        if self.onloading_disabled:
-            return key
+        offloaded = self.offloaded_values[self.module, key]
+        if offloaded is None:
+            return None
 
         # onload value, potentially from cache
-        if key not in self.onload_values:
+        if offloaded not in self.onload_values:
 
             # onload value from (cpu)
-            onloaded_value = self.onload(key)
-            self.onload_values[key] = onloaded_value
+            onloaded_value = self.onload(offloaded)
+            self.onload_values[offloaded] = onloaded_value
 
         else:
-            onloaded_value = self.onload_values[key]
-
-        # if offloading is disabled, keep a strong reference (to keep the value alive)
-        if self.offloading_disabled:
-            self.keep_onloaded_values.add(onloaded_value)
+            onloaded_value = self.onload_values[offloaded]
 
         return onloaded_value
+    
+    def __contains__(self, key) -> bool:
+        return (self.module, key) in self.offloaded_values
+    
+    def __iter__(self):
+        return iter([(module, key) for module, key in self.offloaded_values])
 
-    def __setitem__(self, key: torch.Tensor, value: torch.Tensor):
+    def __len__(self):
+        return len(self.offloaded_values)
+
+    def __setitem__(self, key: str, value: torch.Tensor):
         """
         :param key: offloaded tensor whose value will be updated
         :param value: value used to update
         """
-        # invalidate onloaded values
-        del self[key]
-
         # update data
-        key.copy_(value)
+        print("__setitem__")
+        self.offloaded_values[self.module, key] = value
 
-    def __delitem__(self, key: torch.Tensor):
+    def __delitem__(self, key: str):
         """
         :param key: offloaded tensor to be removed from the cache
         """
-        # remove any strong references to onloaded values
-        if (
-            self.offloading_disabled
-            and key in self.onload_values
-            and self.onload_values[key] in self.keep_onloaded_values
-        ):
-            self.keep_onloaded_values.remove(self.onload_values[key])
+        del self.offloaded_values[self.module, key]
 
-    @contextlib.contextmanager
-    def disable_offloading(self):
-        """
-        Context to disable all offloading for offloaded modules which share this cache.
-        After a weight has been fetched once, that onloaded value is cached and
-        subsequent fetches will leverage the cache, reducing device movement
-        """
-        if not self.offloading_disabled:
-            self.offloading_disabled = True
-            self.keep_onloaded_values.update(self.onload_values.values())
-            yield
-            self.offloading_disabled = False
-            self.keep_onloaded_values.clear()
-        else:
-            yield
-
-    @contextlib.contextmanager
-    def disable_onloading(self):
-        """
-        Context to disable all onloading for offloaded modules which share this cache.
-        This is mostly used for debugging purposes, and allows the caller to directly
-        inspect offloaded tensors and directly assign offloaded tensors without copying
-        """
-        if not self.onloading_disabled:
-            self.onloading_disabled = True
-            yield
-            self.onloading_disabled = False
-        else:
-            yield

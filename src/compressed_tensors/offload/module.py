@@ -151,15 +151,20 @@ class OffloadedModule(torch.nn.Module):
         cls,
         module: ModuleType,
         cache: OffloadCache,
-        no_split: bool = False,
+        no_split=False
     ) -> ModuleType:
-        class_name = module.__class__.__name__
-        if class_name not in _offloaded_module_subclasses:
-            _offloaded_module_subclasses[class_name] = make_offload_module_subclass(
-                module.__class__
-            )
+        prefixed_cache = cache.curry_module(module)
 
-        return _offloaded_module_subclasses[class_name](module, cache, no_split)
+        for name, param in module._parameters.items():
+            prefixed_cache[name] = param
+
+        for name, param in module._buffers.items():
+            prefixed_cache[name] = param
+
+        module.__dict__["_parameters"] = prefixed_cache
+        module.__dict__["_buffers"] = prefixed_cache
+        
+        return module
 
 
 def make_offload_module_subclass(parent_cls: type) -> type:
@@ -183,3 +188,11 @@ def copy_function(func):
         argdefs=func.__defaults__,
         closure=func.__closure__,
     )
+
+
+def offload_module(module: ModuleType, cache: OffloadCache) -> ModuleType:
+    prefixed_cache = cache.curry_module(module)
+    module._parameters = prefixed_cache
+    module._buffers = prefixed_cache
+    
+    return module
