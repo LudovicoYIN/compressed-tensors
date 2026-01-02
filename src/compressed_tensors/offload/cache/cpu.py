@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import ClassVar, Optional
+from typing import ClassVar
 from weakref import WeakValueDictionary
 
 import torch
@@ -33,19 +33,11 @@ class CPUCache(OffloadCache):
     onload_device: ClassVar[torch.device | str]
     offload_device = torch.device("cpu")
 
-    # flags for disabling
-    offloading_disabled = False
-    onloading_disabled = False
+    offloading_disabled = [False]
+    onloading_disabled = [False]
 
-    # offloaded tensors -> onloaded tensors
     onload_values = WeakValueDictionary()
-
-    # while offloading is disabled, keep a strong reference
-    keep_onloaded_values: ClassVar[set[torch.Tensor]] = set()
-
-    # populated by _parameters or _buffers
-    # names -> offloaded tensors
-    offloaded_values: dict[str, torch.Tensor]
+    keep_onloaded_values = set()
 
     def onload(self, offloaded: torch.Tensor) -> torch.Tensor:
         """

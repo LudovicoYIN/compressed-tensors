@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import contextlib
-import inspect
 from functools import wraps
 from typing import Iterator, TypeVar
 
@@ -40,8 +39,9 @@ def offload_module(
 
     @wraps(original_forward_func)
     def forward(self, *args, **kwargs):
-        args = send_tensors(args, device=onload_device)
-        kwargs = send_tensors(kwargs, device=onload_device)
+        if not cache.onloading_disabled[0]:
+            args = send_tensors(args, device=onload_device)
+            kwargs = send_tensors(kwargs, device=onload_device)
 
         if no_split:
             with cache.disable_offloading():
@@ -49,7 +49,6 @@ def offload_module(
         else:
             return original_forward_func(self, *args, **kwargs)
 
-    assert inspect.signature(forward) == inspect.signature(original_forward_func)
     module.forward = forward.__get__(module)
 
     return module

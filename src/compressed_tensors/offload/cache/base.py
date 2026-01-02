@@ -13,32 +13,29 @@
 # limitations under the License.
 
 import contextlib
-import inspect
 from abc import ABC, abstractmethod
 from collections.abc import MutableMapping
-from functools import wraps
 from typing import ClassVar, Literal, Optional
 from weakref import WeakValueDictionary
 
 import torch
 import torch.distributed as dist
-from compressed_tensors.offload.utils import send_tensors
 from compressed_tensors.utils.global_access import GlobalAccess
 
 
-class OffloadCache(GlobalAccess, MutableMapping):
+class OffloadCache(GlobalAccess, MutableMapping, ABC):
     onload_device: torch.device | str
     offload_device: ClassVar[Optional[torch.device | str]]
 
-    # flags for disabling
-    offloading_disabled: ClassVar[bool]
-    onloading_disabled: ClassVar[bool]
+    # mutable flags for disabling
+    offloading_disabled: ClassVar[list[bool]]
+    onloading_disabled: ClassVar[list[bool]]
 
     # offloaded tensors -> onloaded tensors
     onload_values: ClassVar[WeakValueDictionary[torch.Tensor, torch.Tensor]]
 
     # while offloading is disabled, keep a strong reference
-    keep_onloaded_values: ClassVar[set[torch.Tensor]] = set()
+    keep_onloaded_values: ClassVar[set[torch.Tensor]]
 
     # populated by _parameters or _buffers
     # names -> offloaded tensors
@@ -88,7 +85,6 @@ class OffloadCache(GlobalAccess, MutableMapping):
         :param offloaded: offloaded tensor
         :return: onloaded tensor
         """
-        # IMPL: return send_tensors(key, device=self.onload_device, copy=True)
         raise NotImplementedError()
 
     @abstractmethod
@@ -99,7 +95,6 @@ class OffloadCache(GlobalAccess, MutableMapping):
         :param tensor: tensor to offload
         :return: offloaded tensor
         """
-        # IMPL: return send_tensors(value, device=self.offload_device, copy=True)
         raise NotImplementedError()
 
     def __getitem__(self, key: str) -> torch.Tensor:
@@ -108,8 +103,8 @@ class OffloadCache(GlobalAccess, MutableMapping):
         :return: onloaded tensor
         """
         offloaded = self.offloaded_values[key]
-        if offloaded is None:
-            return None
+        if offloaded is None or self.onloading_disabled[0]:
+            return offloaded
 
         # onload value, potentially from cache
         if offloaded not in self.onload_values:
@@ -121,10 +116,17 @@ class OffloadCache(GlobalAccess, MutableMapping):
         else:
             onloaded_value = self.onload_values[offloaded]
 
+        # keep a strong reference to keep in weakref dict
+        if self.offloading_disabled[0]:
+            self.keep_onloaded_values.add(onloaded_value)
+
         return onloaded_value
 
     def __setitem__(self, key: str, value: torch.Tensor):
         """ """
+        if key in self:
+            del self[key]
+
         # when onloading is disabled, parameters can be access and assigned directly
         if self.onloading_disabled:
             self.offloaded_values[key] = value
@@ -141,9 +143,9 @@ class OffloadCache(GlobalAccess, MutableMapping):
         offloaded = self.offloaded_values[key]
         if (
             offloaded in self.onload_values
-            and self.onload_values[offloaded] in self.offloaded_values
+            and self.onload_values[offloaded] in self.keep_onloaded_values
         ):
-            del self.offloaded_values[self.onload_values[offloaded]]
+            self.keep_onloaded_values.remove(self.onload_values[offloaded])
 
         del self.offloaded_values[key]
 
@@ -164,11 +166,11 @@ class OffloadCache(GlobalAccess, MutableMapping):
         After a weight has been fetched once, that onloaded value is cached and
         subsequent fetches will leverage the cache, reducing device movement
         """
-        if not cls.offloading_disabled:
-            cls.offloading_disabled = True
+        if not cls.offloading_disabled[0]:
+            cls.offloading_disabled[0] = True
             cls.keep_onloaded_values.update(cls.onload_values.values())
             yield
-            cls.offloading_disabled = False
+            cls.offloading_disabled[0] = False
             cls.keep_onloaded_values.clear()
         else:
             yield
@@ -181,9 +183,9 @@ class OffloadCache(GlobalAccess, MutableMapping):
         This is mostly used for debugging purposes, and allows the caller to directly
         inspect offloaded tensors and directly assign offloaded tensors without copying
         """
-        if not cls.onloading_disabled:
-            cls.onloading_disabled = True
+        if not cls.onloading_disabled[0]:
+            cls.onloading_disabled[0] = True
             yield
-            cls.onloading_disabled = False
+            cls.onloading_disabled[0] = False
         else:
             yield

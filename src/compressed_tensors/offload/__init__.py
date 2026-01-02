@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import contextlib
-from typing import Iterable, Iterator, Optional
+from typing import Iterable, Optional
 
 import torch
 from compressed_tensors.offload.cache import OffloadCache
@@ -52,6 +52,18 @@ def disable_offloading():
         for suclass in OffloadCache.__subclasses__():
             for cache in suclass.instances():
                 stack.enter_context(cache.disable_offloading())
+        yield
+
+
+@contextlib.contextmanager
+def disable_onloading():
+    """
+    TODO
+    """
+    with contextlib.ExitStack() as stack:
+        for suclass in OffloadCache.__subclasses__():
+            for cache in suclass.instances():
+                stack.enter_context(cache.disable_onloading())
         yield
 
 

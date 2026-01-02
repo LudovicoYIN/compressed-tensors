@@ -18,6 +18,7 @@ from weakref import ref
 
 import pytest
 import torch
+from compressed_tensors.offload import disable_offloading, disable_onloading
 from compressed_tensors.offload.cache.cpu import CPUCache
 from compressed_tensors.offload.module import offload_module
 from tests.testing_utils import requires_gpu
@@ -34,8 +35,13 @@ def cache():
 
 @pytest.fixture(scope="function")
 def linear(cache):
-    linear = torch.nn.Linear(5, 5, bias=True, device=OFFLOAD_DEVICE)
-    return OffloadedModule.from_module(linear, cache)
+    return torch.nn.Linear(5, 5, bias=True, device=OFFLOAD_DEVICE)
+
+
+@pytest.fixture(scope="function")
+def offloaded_linear(linear, cache):
+    offload_module(linear, cache, ONLOAD_DEVICE)
+    return linear
 
 
 @pytest.fixture(scope="function")
@@ -45,10 +51,11 @@ def input():
 
 @pytest.mark.unit
 @requires_gpu
-def test_onloading(linear: torch.nn.Linear | OffloadedModule):
-    weight = linear._module.weight
-    bias = linear._module.bias
+def test_onloading(linear: torch.nn.Linear, cache):
+    weight = linear.weight
+    bias = linear.bias
 
+    offload_module(linear, cache, ONLOAD_DEVICE)
     onloaded_weight = linear.weight
     onloaded_bias = linear.bias
 
@@ -63,11 +70,11 @@ def test_onloading(linear: torch.nn.Linear | OffloadedModule):
 
 @pytest.mark.unit
 @requires_gpu
-def test_garbage_collect(linear: torch.nn.Linear | OffloadedModule):
-    weight_ref = ref(linear.weight)
-    bias_ref = ref(linear.bias)
+def test_garbage_collect(offloaded_linear: torch.nn.Linear):
+    weight_ref = ref(offloaded_linear.weight)
+    bias_ref = ref(offloaded_linear.bias)
 
-    del linear
+    del offloaded_linear
     gc.collect()
 
     assert weight_ref() is None
@@ -76,13 +83,13 @@ def test_garbage_collect(linear: torch.nn.Linear | OffloadedModule):
 
 @pytest.mark.unit
 @requires_gpu
-def test_disable_offloading(linear: torch.nn.Linear | OffloadedModule):
-    outside_onloaded = linear.weight
+def test_disable_offloading(offloaded_linear: torch.nn.Linear):
+    outside_onloaded = offloaded_linear.weight
     outside_onloaded_ref = ref(outside_onloaded)
     assert outside_onloaded.device == ONLOAD_DEVICE
 
-    with linear.disable_offloading():
-        inside_onloaded = linear.weight
+    with disable_offloading():
+        inside_onloaded = offloaded_linear.weight
         inside_onloaded_ref = ref(inside_onloaded)
         assert inside_onloaded.device == ONLOAD_DEVICE
 
@@ -99,29 +106,31 @@ def test_disable_offloading(linear: torch.nn.Linear | OffloadedModule):
 
 @pytest.mark.unit
 @requires_gpu
-def test_disable_onloading(linear: torch.nn.Linear | OffloadedModule):
-    offloaded_weight = linear._module.weight
+def test_disable_onloading(linear: torch.nn.Linear, cache):
+    offloaded_weight = linear.weight
 
-    with linear.disable_onloading():
+    offload_module(linear, cache, ONLOAD_DEVICE)
+
+    with disable_onloading():
         weight = linear.weight
-        assert weight is offloaded_weight
+        assert weight.data_ptr() == offloaded_weight.data_ptr()
 
         # new parameter assignments are direct
         new_param = torch.nn.Parameter(torch.ones(5, device=ONLOAD_DEVICE))
         linear.new_param = new_param
         assert linear.new_param is new_param
 
-    assert weight is offloaded_weight
+    assert weight.data_ptr() == offloaded_weight.data_ptr()
 
 
 @pytest.mark.unit
 @requires_gpu
-def test_delete(linear: torch.nn.Linear | OffloadedModule):
-    weight_ref = ref(linear.weight)
-    bias_ref = ref(linear.bias)
+def test_delete(offloaded_linear: torch.nn.Linear):
+    weight_ref = ref(offloaded_linear.weight)
+    bias_ref = ref(offloaded_linear.bias)
 
-    del linear.weight
-    del linear.bias
+    del offloaded_linear.weight
+    del offloaded_linear.bias
     gc.collect()
 
     assert weight_ref() is None
@@ -131,66 +140,27 @@ def test_delete(linear: torch.nn.Linear | OffloadedModule):
 @pytest.mark.unit
 @requires_gpu
 @pytest.mark.parametrize("no_split", [True, False])
-def test_forward_call(linear: torch.nn.Linear | OffloadedModule, no_split):
-    linear._no_split = no_split
+def test_forward_call(linear: torch.nn.Linear, cache, no_split):
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        assert input.device == ONLOAD_DEVICE
+        assert self._parameters.offloading_disabled[0] == no_split
+        return torch.nn.functional.linear(input, linear.weight, linear.bias)
+
+    linear.forward = forward.__get__(linear)
+
+    offload_module(linear, cache, ONLOAD_DEVICE, no_split)
 
     with torch.no_grad():
         input = torch.zeros(5, device=OFFLOAD_DEVICE)
         output = linear.forward(input)
         assert output.device == ONLOAD_DEVICE
 
-        def pre_hook(module, args, *_):
-            assert args[0].device == ONLOAD_DEVICE
-            assert module._cache.offloading_disabled == no_split
-
-        def post_hook(module, args, *_):
-            assert args[0].device == ONLOAD_DEVICE
-            assert module._cache.offloading_disabled == no_split
-
-        linear.register_forward_pre_hook(pre_hook)
-        linear.register_forward_hook(post_hook)
-
-        output = linear(input)
-        assert output.device == ONLOAD_DEVICE
-
-
-def test_modules(cache):
-    class Parent(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.linear0 = torch.nn.Linear(5, 5)
-            self.linear1 = torch.nn.Linear(5, 5)
-
-    parent = Parent()
-    parent_modules = list(parent.modules())
-    parent_children = list(parent.children())
-
-    parent.linear0 = OffloadedModule.from_module(parent.linear0, cache)
-    parent.linear1 = OffloadedModule.from_module(parent.linear1, cache)
-    offloaded = OffloadedModule.from_module(parent, cache)
-
-    for (_, module), orig_module in zip(offloaded.named_modules(), parent_modules):
-        assert isinstance(module, OffloadedModule)
-        assert module._module is orig_module
-
-    for module, orig_module in zip(offloaded.modules(), parent_modules):
-        assert isinstance(module, OffloadedModule)
-        assert module._module is orig_module
-
-    for (_, module), orig_module in zip(offloaded.named_children(), parent_children):
-        assert isinstance(module, OffloadedModule)
-        assert module._module is orig_module
-
-    for module, orig_module in zip(offloaded.children(), parent_children):
-        assert isinstance(module, OffloadedModule)
-        assert module._module is orig_module
-
 
 @pytest.mark.parametrize("param_device", (ONLOAD_DEVICE, OFFLOAD_DEVICE))
 @pytest.mark.parametrize("use_register_parameter", (True, False))
 @pytest.mark.parametrize("requires_grad", (True, False))
 def test_register_parameter(
-    linear: torch.nn.Linear | OffloadedModule,
+    offloaded_linear: torch.nn.Linear,
     param_device,
     use_register_parameter,
     requires_grad,
@@ -199,46 +169,47 @@ def test_register_parameter(
     data = torch.ones(5, device=param_device)
     param = torch.nn.Parameter(data, requires_grad=requires_grad)
     if use_register_parameter:
-        linear.register_parameter("param_name", param)
+        offloaded_linear.register_parameter("param_name", param)
     else:
-        linear.param_name = param
+        offloaded_linear.param_name = param
 
     # new param is correctly onloaded
-    assert linear.param_name.device == ONLOAD_DEVICE
-    assert torch.equal(linear.param_name.to(param_device), param)
+    assert offloaded_linear.param_name.device == ONLOAD_DEVICE
+    assert torch.equal(offloaded_linear.param_name.to(param_device), param)
 
 
 @pytest.mark.parametrize("param_device", (ONLOAD_DEVICE, OFFLOAD_DEVICE))
 @pytest.mark.parametrize("use_register_parameter", (True, False))
 @pytest.mark.parametrize("requires_grad", (True, False))
 def test_register_parameter_invalidates(
-    linear: torch.nn.Linear | OffloadedModule,
+    offloaded_linear: torch.nn.Linear,
     param_device,
     use_register_parameter,
     requires_grad,
 ):
-    with linear.disable_offloading():
+    with disable_offloading():
         # original weight is kept onloaded
-        onloaded_weight = linear.weight
-        assert onloaded_weight in linear._cache.keep_onloaded_values
+        onloaded_weight = offloaded_linear.weight
+        assert onloaded_weight in offloaded_linear._parameters.keep_onloaded_values
 
         # add new param
         data = torch.ones(5, device=param_device)
         param = torch.nn.Parameter(data, requires_grad=requires_grad)
         if use_register_parameter:
-            linear.register_parameter("weight", param)
+            offloaded_linear.register_parameter("weight", param)
         else:
-            linear.weight = param
+            offloaded_linear.weight = param
 
         # new param is correct
-        assert linear.weight.device == ONLOAD_DEVICE
-        assert torch.equal(linear.weight.to(param_device), param)
+        assert offloaded_linear.weight.device == ONLOAD_DEVICE
+        assert torch.equal(offloaded_linear.weight.to(param_device), param)
 
         # original weight is invalidated
-        assert onloaded_weight not in linear._cache.keep_onloaded_values
+        assert onloaded_weight not in offloaded_linear._parameters.keep_onloaded_values
 
 
-def test_forward_signature(linear: torch.nn.Linear | OffloadedModule):
-    assert inspect.signature(linear.forward) == inspect.signature(
-        linear._module.forward
-    )
+def test_forward_signature(linear: torch.nn.Linear, cache):
+    original_signature = inspect.signature(linear.forward)
+
+    offload_module(linear, cache, ONLOAD_DEVICE)
+    assert inspect.signature(linear.forward) == original_signature

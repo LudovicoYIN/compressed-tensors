@@ -34,7 +34,8 @@ def cache():
 @requires_gpu
 def test_onloading(cache: CPUCache):
     tensor = torch.ones(10)
-    onloaded = cache[tensor]
+    cache["weight"] = tensor
+    onloaded = cache["weight"]
 
     assert type(onloaded) is type(tensor)
     assert torch.equal(onloaded.to(tensor.device), tensor)
@@ -43,8 +44,8 @@ def test_onloading(cache: CPUCache):
 @pytest.mark.unit
 @requires_gpu
 def test_garbage_collect(cache: CPUCache):
-    tensor = torch.ones(10)
-    onloaded = cache[tensor]
+    cache["weight"] = torch.ones(10)
+    onloaded = cache["weight"]
 
     onloaded_ref = ref(onloaded)
     del onloaded
@@ -58,19 +59,29 @@ def test_offload(cache: CPUCache):
     tensor = torch.ones(10, device=ONLOAD_DEVICE)
     offloaded = cache.offload(tensor)
     assert offloaded.device == OFFLOAD_DEVICE
+    assert torch.equal(offloaded.to(ONLOAD_DEVICE), tensor)
+
+
+@pytest.mark.unit
+@requires_gpu
+def test_onload(cache: CPUCache):
+    tensor = torch.ones(10, device=ONLOAD_DEVICE)
+    onloaded = cache.onload(cache.offload(tensor))
+    assert onloaded.device == ONLOAD_DEVICE
+    assert torch.equal(onloaded, onloaded)
 
 
 @pytest.mark.unit
 @requires_gpu
 def test_disable_offloading(cache: CPUCache):
-    tensor = torch.ones(10)
+    cache["weight"] = torch.ones(10)
 
-    outside_onloaded = cache[tensor]
+    outside_onloaded = cache["weight"]
     outside_onloaded_ref = ref(outside_onloaded)
     assert outside_onloaded.device == ONLOAD_DEVICE
 
     with cache.disable_offloading():
-        inside_onloaded = cache[tensor]
+        inside_onloaded = cache["weight"]
         inside_onloaded_ref = ref(inside_onloaded)
         assert inside_onloaded.device == ONLOAD_DEVICE
 
@@ -89,9 +100,10 @@ def test_disable_offloading(cache: CPUCache):
 @requires_gpu
 def test_disable_onloading(cache: CPUCache):
     tensor = torch.ones(10)
+    cache.offloaded_values["weight"] = tensor
 
     with cache.disable_onloading():
-        onloaded = cache[tensor]
+        onloaded = cache["weight"]
         assert onloaded is tensor
 
     assert onloaded is tensor
@@ -100,15 +112,28 @@ def test_disable_onloading(cache: CPUCache):
 @pytest.mark.unit
 @requires_gpu
 def test_delete(cache: CPUCache):
-    tensor = torch.ones(10)
-    onloaded = cache[tensor]
+    cache["weight"] = torch.ones(10)
+    onloaded = cache["weight"]
     onloaded_ref = ref(onloaded)
 
     with cache.disable_offloading():
-        del cache[tensor]
+        del cache["weight"]
         del onloaded
         gc.collect()
 
         assert onloaded_ref() is None
 
     assert onloaded_ref() is None
+
+
+@pytest.mark.unit
+@requires_gpu
+def test_shared_attributes(cache: CPUCache):
+    assert cache.offload_device is CPUCache.offload_device
+    assert cache.offloading_disabled is CPUCache.offloading_disabled
+    assert cache.onloading_disabled is CPUCache.onloading_disabled
+    assert cache.onload_values is CPUCache.onload_values
+    assert cache.keep_onloaded_values is CPUCache.keep_onloaded_values
+
+    assert not hasattr(CPUCache, "onload_device")
+    assert not hasattr(CPUCache, "offloaded_values")
