@@ -11,11 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import warnings
 from copy import deepcopy
 from typing import List, Optional
 
+import torch
 from compressed_tensors.config import CompressionFormat
 from compressed_tensors.quantization.quant_args import (
     FP8_E4M3_DATA,
@@ -192,6 +192,43 @@ NVFP4 = dict(
     ),
 )
 
+MXFP4A16 = dict(
+    weights=QuantizationArgs(
+        num_bits=4,
+        type=QuantizationType.FLOAT,
+        strategy=QuantizationStrategy.GROUP,
+        symmetric=True,
+        dynamic=False,
+        group_size=32,
+        scale_dtype=torch.uint8,
+        zp_dtype=torch.uint8,
+    )
+)
+
+MXFP4 = dict(
+    weights=QuantizationArgs(
+        num_bits=4,
+        type=QuantizationType.FLOAT,
+        strategy=QuantizationStrategy.GROUP,
+        symmetric=True,
+        dynamic=False,
+        group_size=32,
+        scale_dtype=torch.uint8,
+        zp_dtype=torch.uint8,
+    ),
+    input_activations=QuantizationArgs(
+        num_bits=4,
+        type=QuantizationType.FLOAT,
+        strategy=QuantizationStrategy.GROUP,
+        dynamic=True,
+        symmetric=True,
+        group_size=32,
+        scale_dtype=torch.uint8,
+        zp_dtype=torch.uint8,
+    ),
+)
+
+
 # 8 bit integer weights and 8 bit activations quantization
 INT8_W8A8 = dict(
     weights=QuantizationArgs(
@@ -259,6 +296,26 @@ INT8_W4A8 = dict(
     input_activations=QuantizationArgs(
         num_bits=8,
         type=QuantizationType.INT,
+        strategy=QuantizationStrategy.TOKEN,
+        symmetric=True,
+        dynamic=True,
+        observer=None,
+    ),
+)
+
+# 4 bit integer weights and 8 bit FP activations quantization
+W4AFP8 = dict(
+    weights=QuantizationArgs(
+        num_bits=4,
+        type=QuantizationType.INT,
+        strategy=QuantizationStrategy.GROUP,
+        group_size=128,
+        symmetric=True,
+        dynamic=False,
+    ),
+    input_activations=QuantizationArgs(
+        num_bits=8,
+        type=QuantizationType.FLOAT,
         strategy=QuantizationStrategy.TOKEN,
         symmetric=True,
         dynamic=True,
@@ -337,10 +394,13 @@ PRESET_SCHEMES = {
     "W8A8": INT8_W8A8,
     "INT8": INT8_W8A8,  # alias for W8A8
     "W4A8": INT8_W4A8,
+    "W4AFP8": W4AFP8,
     # Float weight and activation schemes
     "FP8": FP8,
     "FP8_DYNAMIC": FP8_DYNAMIC,
     "FP8_BLOCK": FP8_BLOCK,
     "NVFP4A16": NVFP4A16,
     "NVFP4": NVFP4,
+    "MXFP4A16": MXFP4A16,
+    "MXFP4": MXFP4,
 }
